@@ -24,7 +24,7 @@ export const medicationSchema = z.object({
 }).strict().refine((v) => !v.ends_on || v.ends_on >= v.starts_on, { path: ["ends_on"], message: "End date must be on or after the start date." })
   .refine((v) => !v.id || !!v.version, { path: ["version"], message: "Reload this medication before editing." });
 export const doseSchema = z.object({ medication_id: idSchema, scheduled_date: dateSchema }).strict();
-export const consentSchema = z.object({ id: idSchema, status: z.enum(["active", "revoked"]), can_manage_medications: z.boolean() }).strict();
+export const consentSchema = z.object({ id: idSchema, status: z.enum(["active", "revoked"]), can_manage_medications: z.boolean(), caregiver_role: z.enum(["primary", "supporting", "viewer"]).default("supporting"), can_view_health: z.boolean().default(true), can_manage_appointments: z.boolean().default(false), can_manage_contacts: z.boolean().default(false) }).strict().refine(v => (v.caregiver_role !== "viewer" && v.can_view_health) || !(v.can_manage_medications || v.can_manage_appointments || v.can_manage_contacts), "Viewers cannot manage care records.");
 
 export function localDate(timezone: string, now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);

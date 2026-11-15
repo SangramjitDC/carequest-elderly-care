@@ -16,7 +16,7 @@ export async function saveMedication(input: unknown): Promise<ActionResult> {
     if (profile.role !== "caregiver") throw new CareError("Only an authorized caregiver can change medications.", 403);
     const { id, version, ...medication } = parsed.data;
     const { data: relationship, error: relationError } = await db.from("caregiver_relationships").select("id")
-      .eq("caregiver_id", profile.id).eq("elderly_id", medication.patient_id).eq("status", "active").eq("can_manage_medications", true).maybeSingle();
+      .eq("caregiver_id", profile.id).eq("elderly_id", medication.patient_id).eq("status", "active").eq("can_view_health", true).neq("caregiver_role", "viewer").eq("can_manage_medications", true).maybeSingle();
     if (relationError || !relationship) throw new CareError("Medication access has not been approved or was revoked.", 403);
     if (id) {
       const { patient_id, ...changes } = medication;
@@ -64,7 +64,7 @@ export async function setCareConsent(input: unknown): Promise<ActionResult> {
     if (profile.role !== "elderly") throw new CareError("Only the older adult can approve or revoke access.", 403);
     const { id, ...changes } = parsed.data;
     const { data, error } = await db.from("caregiver_relationships").update(changes).eq("id", id).eq("elderly_id", profile.id).select("id").maybeSingle();
-    if (error || !data) return { ok: false, message: "Access could not be updated. Refresh and try again." };
+    if (error || !data) return { ok: false, message: error?.code === "23505" ? "A primary caregiver already exists. Change their role before assigning another." : "Access could not be updated. Refresh and try again." };
     return { ok: true, message: changes.status === "active" ? "Caregiver access approved." : "Caregiver access revoked." };
   } catch (error) { return failure(error); }
 }

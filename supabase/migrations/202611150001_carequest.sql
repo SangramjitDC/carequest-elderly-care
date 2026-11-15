@@ -47,12 +47,19 @@ create table public.caregiver_relationships (
   elderly_id uuid not null references public.profiles(id) on delete cascade,
   caregiver_id uuid not null references public.profiles(id) on delete cascade,
   status text not null default 'pending' check (status in ('pending', 'active', 'revoked')),
+  caregiver_role text not null default 'supporting' check (caregiver_role in ('primary', 'supporting', 'viewer')),
+  can_view_health boolean not null default true,
+  can_manage_appointments boolean not null default false,
+  can_manage_contacts boolean not null default false,
   can_manage_medications boolean not null default true,
+  check (caregiver_role <> 'viewer' or not (can_manage_medications or can_manage_appointments or can_manage_contacts)),
+  check (can_view_health or not (can_manage_medications or can_manage_appointments or can_manage_contacts)),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (elderly_id, caregiver_id),
   check (elderly_id <> caregiver_id)
 );
+create unique index one_primary_caregiver on public.caregiver_relationships(elderly_id) where status = 'active' and caregiver_role = 'primary';
 create index relationships_caregiver on public.caregiver_relationships(caregiver_id, status);
 
 -- These narrow helpers avoid recursive RLS. Never expose the private schema via the Data API.
@@ -64,20 +71,26 @@ create function private.can_view_patient(patient uuid) returns boolean
 language sql stable security definer set search_path = '' as $$
   select patient = (select auth.uid()) or exists (
     select 1 from public.caregiver_relationships
-    where elderly_id = patient and caregiver_id = (select auth.uid()) and status = 'active'
+    where elderly_id = patient and caregiver_id = (select auth.uid()) and status = 'active' and can_view_health
   );
 $$;
 create function private.can_manage_patient(patient uuid) returns boolean
 language sql stable security definer set search_path = '' as $$
   select exists (select 1 from public.caregiver_relationships
     where elderly_id = patient and caregiver_id = (select auth.uid())
-      and status = 'active' and can_manage_medications);
+      and status = 'active' and can_view_health and can_manage_medications);
+$$;
+create function private.can_manage_resource(patient uuid, resource text) returns boolean
+language sql stable security definer set search_path = '' as $$
+ select exists(select 1 from public.caregiver_relationships where elderly_id=patient and caregiver_id=(select auth.uid())
+ and status='active' and can_view_health and caregiver_role <> 'viewer' and
+ case resource when 'appointments' then can_manage_appointments when 'contacts' then can_manage_contacts else false end);
 $$;
 create function private.can_view_profile(person uuid) returns boolean
 language sql stable security definer set search_path = '' as $$
   select person = (select auth.uid()) or exists (
     select 1 from public.caregiver_relationships where
-      (elderly_id = person and caregiver_id = (select auth.uid()) and status = 'active') or
+      (elderly_id = person and caregiver_id = (select auth.uid()) and status = 'active' and can_view_health) or
       (caregiver_id = person and elderly_id = (select auth.uid()) and status in ('pending', 'active'))
   );
 $$;
@@ -118,6 +131,7 @@ create table public.dose_logs (
   patient_id uuid not null references public.profiles(id),
   scheduled_date date not null,
   scheduled_time time not null,
+  scheduled_at timestamptz not null,
   medication_name text not null,
   dosage text not null,
   taken_at timestamptz not null default now(),
@@ -128,24 +142,30 @@ create table public.dose_logs (
 create index dose_logs_patient_date on public.dose_logs(patient_id, scheduled_date);
 create function private.validate_dose() returns trigger language plpgsql
 set search_path = '' as $$
-declare med public.medications; local_today date;
+declare med public.medications; patient_timezone text; local_today date;
 begin
   select * into med from public.medications where id = new.medication_id and patient_id = new.patient_id;
-  select (now() at time zone timezone)::date into local_today from public.profiles where id = new.patient_id;
-  if med.id is null or not med.active or new.scheduled_date <> local_today or
+  select p.timezone, (statement_timestamp() at time zone p.timezone)::date
+    into patient_timezone, local_today from public.profiles p where p.id = new.patient_id;
+  if med.id is null or patient_timezone is null or not med.active or new.scheduled_date <> local_today or
     new.scheduled_date < med.starts_on or (med.ends_on is not null and new.scheduled_date > med.ends_on) then
     raise exception 'Dose is not scheduled today' using errcode = '23514';
   end if;
   new.scheduled_time = med.scheduled_time;
+  new.scheduled_at = (new.scheduled_date + med.scheduled_time) at time zone patient_timezone;
   new.medication_name = med.name;
   new.dosage = med.dosage;
-  new.taken_at = now();
+  new.taken_at = clock_timestamp();
   new.recorded_by = auth.uid();
   return new;
 end;
 $$;
 create trigger dose_validation before insert on public.dose_logs
 for each row execute function private.validate_dose();
+
+-- Early doses are recorded with their actual timestamp but earn a garden point only once due.
+create view public.garden_eligible_dose_logs with (security_invoker = true) as
+select d.* from public.dose_logs d where d.scheduled_at <= statement_timestamp();
 
 create table public.appointments (
   id uuid primary key default gen_random_uuid(),
@@ -179,12 +199,16 @@ create table public.wellness_check_ins (
 create index wellness_check_ins_patient on public.wellness_check_ins(patient_id, created_at);
 create table public.notification_logs (
   id uuid primary key default gen_random_uuid(),
+  event_key text not null check (char_length(trim(event_key)) between 1 and 200),
   recipient_id uuid not null references public.profiles(id),
   kind text not null check (kind in ('medication', 'appointment', 'sos', 'relationship')),
   status text not null default 'queued' check (status in ('queued', 'sent', 'failed')),
   created_at timestamptz not null default now(),
-  sent_at timestamptz
+  sent_at timestamptz,
+  constraint notification_logs_event_key_unique unique (event_key)
 );
+comment on column public.notification_logs.event_key is
+  'Stable idempotency key per reminder event and recipient; workers should insert with ON CONFLICT (event_key) DO NOTHING.';
 create index notifications_recipient on public.notification_logs(recipient_id, created_at);
 create table public.sos_events (
   id uuid primary key default gen_random_uuid(),
@@ -212,9 +236,10 @@ revoke all on public.profiles, public.caregiver_relationships, public.medication
 grant select on public.profiles, public.caregiver_relationships, public.medications, public.dose_logs,
   public.appointments, public.emergency_contacts, public.wellness_check_ins,
   public.notification_logs, public.sos_events to authenticated;
+grant select on public.garden_eligible_dose_logs to authenticated;
 grant update (display_name) on public.profiles to authenticated;
 grant insert (elderly_id, caregiver_id) on public.caregiver_relationships to authenticated;
-grant update (status, can_manage_medications) on public.caregiver_relationships to authenticated;
+grant update (status, caregiver_role, can_view_health, can_manage_medications, can_manage_appointments, can_manage_contacts) on public.caregiver_relationships to authenticated;
 grant insert (patient_id, name, dosage, instructions, scheduled_time, starts_on, ends_on, active) on public.medications to authenticated;
 grant update (name, dosage, instructions, scheduled_time, starts_on, ends_on, active) on public.medications to authenticated;
 grant insert (medication_id, patient_id, scheduled_date) on public.dose_logs to authenticated;
@@ -244,18 +269,18 @@ create policy dose_logs_record on public.dose_logs for insert to authenticated
 with check (patient_id = (select auth.uid()) and recorded_by = (select auth.uid()) and private.has_role(patient_id, 'elderly'));
 create policy appointments_read on public.appointments for select to authenticated using (private.can_view_patient(patient_id));
 create policy appointments_add on public.appointments for insert to authenticated
-with check (private.has_role(patient_id, 'elderly') and (patient_id = (select auth.uid()) or private.can_manage_patient(patient_id)));
+with check (private.has_role(patient_id, 'elderly') and (patient_id = (select auth.uid()) or private.can_manage_resource(patient_id, 'appointments')));
 create policy appointments_edit on public.appointments for update to authenticated
-using (patient_id = (select auth.uid()) or private.can_manage_patient(patient_id))
-with check (patient_id = (select auth.uid()) or private.can_manage_patient(patient_id));
-create policy appointments_remove on public.appointments for delete to authenticated using (patient_id = (select auth.uid()) or private.can_manage_patient(patient_id));
+using (patient_id = (select auth.uid()) or private.can_manage_resource(patient_id, 'appointments'))
+with check (patient_id = (select auth.uid()) or private.can_manage_resource(patient_id, 'appointments'));
+create policy appointments_remove on public.appointments for delete to authenticated using (patient_id = (select auth.uid()) or private.can_manage_resource(patient_id, 'appointments'));
 create policy contacts_read on public.emergency_contacts for select to authenticated using (private.can_view_patient(patient_id));
 create policy contacts_add on public.emergency_contacts for insert to authenticated
-with check (private.has_role(patient_id, 'elderly') and (patient_id = (select auth.uid()) or private.can_manage_patient(patient_id)));
+with check (private.has_role(patient_id, 'elderly') and (patient_id = (select auth.uid()) or private.can_manage_resource(patient_id, 'contacts')));
 create policy contacts_edit on public.emergency_contacts for update to authenticated
-using (patient_id = (select auth.uid()) or private.can_manage_patient(patient_id))
-with check (patient_id = (select auth.uid()) or private.can_manage_patient(patient_id));
-create policy contacts_remove on public.emergency_contacts for delete to authenticated using (patient_id = (select auth.uid()) or private.can_manage_patient(patient_id));
+using (patient_id = (select auth.uid()) or private.can_manage_resource(patient_id, 'contacts'))
+with check (patient_id = (select auth.uid()) or private.can_manage_resource(patient_id, 'contacts'));
+create policy contacts_remove on public.emergency_contacts for delete to authenticated using (patient_id = (select auth.uid()) or private.can_manage_resource(patient_id, 'contacts'));
 create policy check_ins_read on public.wellness_check_ins for select to authenticated using (private.can_view_patient(patient_id));
 create policy check_ins_add on public.wellness_check_ins for insert to authenticated
 with check (patient_id = (select auth.uid()) and private.has_role(patient_id, 'elderly'));
@@ -268,6 +293,6 @@ using (private.can_manage_patient(patient_id)) with check (private.can_manage_pa
 
 revoke all on all functions in schema private from public, anon, authenticated;
 grant execute on function private.has_role(uuid, text), private.can_view_patient(uuid),
-  private.can_manage_patient(uuid), private.can_view_profile(uuid) to authenticated;
+  private.can_manage_patient(uuid), private.can_manage_resource(uuid, text), private.can_view_profile(uuid) to authenticated;
 
 commit;

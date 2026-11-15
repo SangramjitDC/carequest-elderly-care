@@ -1,4 +1,4 @@
-import { PrescriptionScannerPage } from "../../components/PortalPages";
+import { PrescriptionScannerPage } from "../../components/PrescriptionScanner";
 
 export default function ScannerRoute() {
   return <PrescriptionScannerPage />;

@@ -4,6 +4,7 @@ vi.mock("@/lib/care", () => ({ ...mocks, CareError: class extends Error { constr
 import { markDoseTaken, requestCareAccess, saveMedication, setCareConsent } from "../app/actions/care";
 import { GET } from "../app/api/care/route";
 import { CareError } from "../lib/care";
+import { addCareResource } from "../app/actions/resources";
 
 const patient = "11111111-1111-4111-8111-111111111111";
 const medId = "55555555-5555-4555-8555-555555555555";
@@ -12,13 +13,22 @@ function database(results: unknown[]) {
   const queries: { table: string; eq: ReturnType<typeof vi.fn>; insert: ReturnType<typeof vi.fn> }[] = [];
   const from = vi.fn((table: string) => {
     const result = results.shift();
-    const q = { table, select: vi.fn(() => q), eq: vi.fn(() => q), insert: vi.fn(() => q), update: vi.fn(() => q), single: vi.fn(async () => result), maybeSingle: vi.fn(async () => result), then: (resolve: (value: unknown) => unknown) => Promise.resolve(resolve(result)) };
+    const q = { table, select: vi.fn(() => q), eq: vi.fn(() => q), neq: vi.fn(() => q), insert: vi.fn(() => q), update: vi.fn(() => q), single: vi.fn(async () => result), maybeSingle: vi.fn(async () => result), then: (resolve: (value: unknown) => unknown) => Promise.resolve(resolve(result)) };
     queries.push(q); return q;
   });
   return { from, queries };
 }
 beforeEach(() => { vi.clearAllMocks(); vi.useFakeTimers(); vi.setSystemTime(new Date("2026-11-15T12:00:00Z")); });
 describe("Server action authorization and failures", () => {
+  it("checks separate appointment and contact permissions before writing", async () => {
+    for (const resource of ["appointments", "contacts"] as const) {
+      const db = database([{ data: [], error: null }]);
+      mocks.authenticated.mockResolvedValue({ db, profile: { id: medId, role: "caregiver" } });
+      const input = resource === "appointments" ? { resource, patient_id: patient, title: "Check-up", starts_at: "2026-12-01T10:00:00Z" } : { resource, patient_id: patient, name: "Contact", phone: "+15550102024" };
+      expect((await addCareResource(input)).ok).toBe(false);
+      expect(db.from).toHaveBeenCalledTimes(1);
+    }
+  });
   it("fails closed when unauthenticated", async () => {
     mocks.authenticated.mockRejectedValue(new CareError("Please sign in again.", 401));
     expect(await markDoseTaken({ medication_id: medId, scheduled_date: "2026-11-15" })).toMatchObject({ ok: false, message: "Please sign in again." });

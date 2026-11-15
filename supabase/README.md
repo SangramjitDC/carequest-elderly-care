@@ -1,6 +1,6 @@
 # CAREQUEST database setup
 
-The application now uses Supabase Auth and PostgreSQL for care profiles, caregiver consent, medications, and dose confirmations. The existing design and navigation are retained. AI integration is intentionally not started; the Adaption credential is neither read nor sent anywhere.
+The application uses Supabase Auth and PostgreSQL for care profiles, caregiver consent, medications, dose confirmations, appointments, and emergency contacts. Adaption processes companion questions and prescription images through server-only endpoints. Existing design and navigation are retained.
 
 ## 1. Apply the migration
 
@@ -13,7 +13,7 @@ Back up any existing project data first. This migration creates new CAREQUEST ta
 
 Alternatively, if you use the Supabase CLI, link the intended project and run `supabase db push` from this repository. Review the target project before pushing. Never place an admin database password or service-role credential in application source or a `NEXT_PUBLIC_*` variable.
 
-The configured publishable key intentionally cannot execute migrations. This implementation does not use a service-role key. Applying the SQL requires your Supabase dashboard or an authorized database/CLI session.
+The configured publishable key intentionally cannot execute migrations. Interactive care and AI features use the authenticated session and RLS, never a service-role key. The optional reminder worker alone accepts a server-only service credential. Applying SQL requires your Supabase dashboard or an authorized database/CLI session. The user has reported applying this migration successfully; do not apply it again to that project. No further migration is required for the AI features.
 
 ## 2. Configure authentication
 
@@ -76,12 +76,44 @@ Every medication row represents **one daily dose time**. For multiple doses per 
 
 Concurrent edits use a version check; stale edits are rejected. Database constraints are authoritative even if requests bypass the frontend. Database access is never cached across users. Cross-session synchronization uses authenticated polling every 15 seconds, refresh-on-focus, and refresh after writes; Realtime publication configuration is not required.
 
-The UI currently approves medication-management access. The schema also supports view-only access through `can_manage_medications = false`; that permission also prevents caregiver writes to appointments, emergency contacts and SOS status. The older adult remains in control of consent.
+The UI currently approves medication-management access. The schema also supports view-only access through `can_manage_medications = false`; appointment and contact management now use their own independent permission flags. The older adult remains in control of consent.
 
-Appointment, emergency contact, wellness check-in, notification, and SOS tables are foundations with RLS, **not connected feature workflows yet**. Their existing preview screens remain explicitly labeled as previews. No notifications are sent or emergency assistance dispatched. The companion remains a clearly labeled canned preview; no Gemini or Adaption calls were added.
+Appointments and contacts support creation, viewing, editing, and deletion with independent permissions. The Garden counts unique timing-eligible dose records for the selected patient's current day. Emergency support opens phone links; it does not dispatch help or claim that SOS events were sent. Wellness check-in entry and an SOS acknowledgement workflow remain unimplemented.
 
 ## References
 
 - [Supabase SSR client/session guidance](https://supabase.com/docs/guides/auth/server-side/creating-a-client)
 - [Supabase Row Level Security](https://supabase.com/docs/guides/database/postgres/row-level-security)
 - Next.js 16 documentation bundled in `node_modules/next/dist/docs/`, especially authentication with Cache Components, Server Actions, cookies, and Proxy.
+
+## Many-to-many care update
+
+The migration includes primary/supporting/viewer roles, an active-primary unique index, and separate viewing, medication, appointment, and contact permissions. Only the older adult can change these fields. Viewers cannot have management permissions; management requires viewing. Revoke or change an existing primary role before assigning a new one. The care-circle form exposes all permissions; the caregiver dashboard shows a separate summary per authorized older adult. Summary queries are batched and grouped by patient and local date.
+
+Existing timestamp-based early/late labels, delayed garden reward eligibility, and unique notification event keys are retained. Timing labels compare actual timestamps exactly, not a clinical grace window. The assistant has not executed a hosted migration.
+
+Each resource action checks the current relationship and resource-specific permission; RLS remains authoritative. Appointment inputs explicitly use the device timezone and are stored as UTC timestamps; lists and summaries display the patient's timezone. To replace a primary emergency contact, first edit the existing primary contact and uncheck its primary flag, then select the new primary.
+
+## Adaption companion and prescription scanning
+
+Set `ADAPTION_API_KEY` as a **server-only** variable in the Vercel project, alongside the existing public Supabase URL and publishable key. Local credentials were not changed. Native fetch uses the [official Responses API](https://docs.adaptionlabs.ai/inference-stacks/generate-a-model-response) and [documented models](https://docs.adaptionlabs.ai/inference-stacks/models). Account discovery selects `qwen3.8-27b`, then `qwen3.5-397b`, `gemma-4-26b-a4b-it`, or `gemma-4-31b-it` if the preferred model is unavailable. Only documented text/image models are eligible. There is no Gemini integration.
+
+The companion sends a bounded question and the selected patient's verified care facts to Adaption for intent classification. Deterministic server code produces factual answers from those records; the model cannot calculate adherence, fabricate a schedule, or perform writes. This is a bounded care-record assistant, not an unrestricted medical chatbot. Emergencies bypass the model. AI failures return clearly labeled verified-record answers where possible.
+
+Scanner images are JPEG/PNG/WebP, at most 2 MB, checked for MIME/signature on the server. Images are not persisted by CAREQUEST. Provider requests disable response storage, agentic memory and tools. Extracted fields are schema-validated and remain untrusted until an authorized caregiver checks the prescription and explicitly confirms the editable daily-dose form. Dates and dose times are intentionally not inferred. Weekly/interval/as-needed prescriptions require a separate supported workflow and must not be converted into daily schedules.
+
+Requests require same-origin POSTs, authenticated sessions, current patient permissions, bounded input and provider timeouts. Model output is rendered as plain text. The per-user AI rate limiter is per server instance; production-wide abuse protection should be configured at the deployment gateway. Conversation history is local to the open page, resets on patient change, and is not persisted or forwarded. Provider discovery caches model IDs only, never health context.
+
+Run `node --env-file=.env.local scripts/verify-adaption.mjs --vision` for a synthetic text/image/JSON smoke test. It prints model identifiers and status only, never keys or health records.
+
+## Reminders
+
+Dashboards show in-app medication reminders (due within 30 minutes or earlier but unconfirmed) and appointments within 24 hours. They refresh with care records and do not imply a dose was skipped.
+
+Optional queueing uses `POST /api/reminders`, protected by `Authorization: Bearer <CRON_SECRET>`. It remains disabled unless all of these are configured server-side:
+
+- `CRON_SECRET`: at least 32 characters, used only by the trusted scheduler.
+- `SUPABASE_SERVICE_ROLE_KEY`: backend-only credential; never prefix with `NEXT_PUBLIC_`.
+- `CAREQUEST_REMINDER_PATIENT_IDS`: comma-separated, explicitly opted-in elderly profile IDs (maximum 100).
+
+No scheduler is installed automatically. No test patients are implicitly enrolled. A trusted scheduler can call the POST endpoint periodically after configuration and authorization. Each planned event is inserted into `notification_logs` with `onConflict: event_key` and `ignoreDuplicates: true`; retries cannot create duplicate events. The worker only queues records and never marks them sent. **Email/push delivery is unavailable**; no delivery provider or worker is implemented. Supabase authentication email is not used for reminders. The service credential is restricted in code to allowlisted patients and this worker; interactive routes retain RLS.

@@ -1,4 +1,4 @@
-import { AppointmentsPage } from "../../components/PortalPages";
+import { AppointmentsPage } from "../../components/CareResources";
 
 export default function AppointmentsRoute() {
   return <AppointmentsPage />;
