@@ -1,5 +1,3 @@
-import { CaregiverDashboard } from "../../components/PortalPages";
+import { LiveCaregiverDashboard } from "../../components/LiveCare";
 
-export default function CaregiverPage() {
-  return <CaregiverDashboard />;
-}
+export default function Page() { return <LiveCaregiverDashboard />; }

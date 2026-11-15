@@ -1,5 +1,3 @@
-import { MedicationsPage } from "../../components/PortalPages";
+import { LiveMedicationsPage } from "../../components/LiveCare";
 
-export default function MedicationsRoute() {
-  return <MedicationsPage />;
-}
+export default function Page() { return <LiveMedicationsPage />; }

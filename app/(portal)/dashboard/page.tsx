@@ -1,5 +1,3 @@
-import { ElderlyDashboard } from "../../components/PortalPages";
+import { LiveElderlyDashboard } from "../../components/LiveCare";
 
-export default function DashboardPage() {
-  return <ElderlyDashboard />;
-}
+export default function Page() { return <LiveElderlyDashboard />; }
