@@ -58,6 +58,7 @@ button { color: inherit; }
 .brand-mark { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 12px; color: white; background: var(--teal); box-shadow: 0 4px 10px #0f766e28; }
 .landing-links, .landing-actions { display: flex; align-items: center; gap: 30px; }
 .landing-links a, .text-link { color: #4e6265; font-size: var(--text-body); font-weight: 540; transition: color .15s ease; }
+.landing-links a { min-height: 44px; display: inline-flex; align-items: center; }
 .landing-links a:hover, .text-link:hover { color: var(--teal); }
 .landing-actions { gap: 22px; }
 .hero { position: relative; width: min(1190px, calc(100% - 64px)); min-height: 548px; margin: 0 auto; display: grid; grid-template-columns: .9fr 1.1fr; align-items: center; gap: 45px; padding: 39px 0 68px; }
@@ -120,6 +121,32 @@ button { color: inherit; }
 .stat-strip strong { align-self: end; color: #35504d; font-size: var(--text-body); }
 .stat-strip small { align-self: start; margin-top: 4px; color: #54615f; font-size: var(--text-secondary); }
 .features-section { width: min(1080px, calc(100% - 64px)); margin: 114px auto 110px; display: grid; grid-template-columns: 1fr; gap: 32px; align-items: center; }
+.steps-section { width: min(1080px, calc(100% - 64px)); margin: 105px auto 90px; display: grid; gap: 30px; }
+.steps-section .section-intro h2, .faq-intro h2 { margin: 12px 0 9px; color: #18383a; font-size: clamp(27px, 3.2vw, 36px); line-height: 1.2; letter-spacing: -1.2px; font-weight: 680; }
+.steps-section .section-intro p, .faq-intro p { max-width: 62ch; margin: 0; color: #52615f; font-size: var(--text-body); line-height: 1.8; }
+.steps-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; margin: 0; padding: 0; list-style: none; }
+.step-card { min-height: 238px; padding: 22px; border: 1px solid #e5eeea; border-radius: 16px; background: linear-gradient(155deg, #fff, #f8fbf8); box-shadow: 0 8px 24px #21443a08; }
+.step-number { display: block; color: #4d897a; font-size: var(--text-secondary); font-weight: 760; letter-spacing: .12em; }
+.step-icon { width: 48px; height: 48px; margin-top: 20px; display: grid; place-items: center; border-radius: 14px; background: #e8f5ed; color: #0f766e; }
+.step-card:nth-child(2) .step-icon { background: #eef4fa; color: #557a98; }
+.step-card:nth-child(3) .step-icon { background: #f2effa; color: #7567a6; }
+.step-card h3 { margin: 17px 0 7px; color: #294744; font-size: var(--text-section); font-weight: 680; letter-spacing: -.3px; }
+.step-card p { margin: 0; color: #52615f; font-size: var(--text-body); line-height: 1.75; }
+.faq-section { width: min(920px, calc(100% - 64px)); margin: 100px auto 105px; }
+.faq-intro { margin-bottom: 27px; }
+.faq-intro h2 { font-size: clamp(27px, 3.2vw, 34px); }
+.faq-list { display: grid; gap: 11px; }
+.faq-item { overflow: hidden; border: 1px solid #e3ebe7; border-radius: 13px; background: #fff; box-shadow: 0 4px 14px #21443a06; }
+.faq-item[open] { border-color: #b7d8ca; box-shadow: 0 7px 20px #21443a0a; }
+.faq-question { min-height: 68px; padding: 13px 19px; display: grid; grid-template-columns: 34px minmax(0, 1fr) 34px; align-items: center; gap: 13px; color: #294744; font-size: var(--text-detail); line-height: 1.45; font-weight: 660; cursor: pointer; list-style: none; }
+.faq-question::-webkit-details-marker { display: none; }
+.faq-index { color: #548b7a; font-size: var(--text-body); font-weight: 720; font-variant-numeric: tabular-nums; }
+.faq-toggle { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; background: #eef7f1; color: #317864; font-size: 24px; line-height: 1; font-weight: 400; transition: transform .18s ease, background .18s ease; }
+.faq-item[open] .faq-toggle { transform: rotate(45deg); background: #dff0e5; }
+.faq-answer { padding: 0 66px 20px; color: #4f5f5c; font-size: var(--text-body); line-height: 1.8; }
+.faq-answer p { margin: 0; }
+.faq-answer p + p { margin-top: 9px; }
+.faq-answer strong { color: #294e46; font-weight: 700; }
 .section-intro h2 { margin: 14px 0 10px; color: #18383a; font-size: 32px; line-height: 1.2; letter-spacing: -1.3px; font-weight: 670; }
 .section-intro p { max-width: 310px; color: #54615f; font-size: var(--text-body); line-height: 1.8; }
 .feature-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
@@ -628,7 +655,7 @@ svg { flex-shrink: 0; }
   .auth-main { min-height: 100vh; }
 }
 @media (max-width: 640px) {
-  .landing-nav, .hero, .stat-strip, .features-section, .closing-cta { width: calc(100% - 32px); }
+  .landing-nav, .hero, .stat-strip, .steps-section, .features-section, .faq-section, .closing-cta { width: calc(100% - 32px); }
   .landing-links { order: 3; width: 100%; gap: 12px 24px; }
   .landing-actions { flex-wrap: wrap; gap: 12px; }
   .hero { padding: 32px 0; }
@@ -638,6 +665,16 @@ svg { flex-shrink: 0; }
   .float-note { padding: 8px 12px; }
   .stat-strip, .feature-grid { grid-template-columns: minmax(0, 1fr); }
   .features-section { margin: 64px auto; }
+  .steps-section { margin: 64px auto; gap: 22px; }
+  .steps-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .step-card { min-height: 0; padding: 19px; }
+  .step-icon { margin-top: 14px; }
+  .step-card h3 { margin-top: 13px; }
+  .faq-section { margin: 68px auto; }
+  .faq-intro { margin-bottom: 19px; }
+  .faq-question { min-height: 64px; padding: 12px; grid-template-columns: 28px minmax(0, 1fr) 32px; gap: 8px; font-size: var(--text-body); }
+  .faq-index { font-size: var(--text-secondary); }
+  .faq-answer { padding: 0 16px 18px 48px; font-size: var(--text-body); }
   .closing-cta { padding: 24px; }
   .landing-footer { padding: 24px 16px; }
   .portal-content { padding: 24px 16px 40px; }

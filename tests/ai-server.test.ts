@@ -39,6 +39,19 @@ describe("AI server authorization and safe fallback", () => {
     expect(response.status).toBe(200); expect(response.headers.get("cache-control")).toContain("no-store");
     const body = await response.json(); expect(body.text).toContain("No medication is scheduled"); expect(body.source).toContain("fallback"); expect(JSON.stringify(body)).not.toContain("SECRET_PROVIDER_ERROR");
   });
+  it("sends only the user's question to the AI intent classifier", async () => {
+    const privateProfile = { ...profile, display_name: "PRIVATE_PATIENT_NAME" };
+    const db = database([ok([]), ok(privateProfile), ok([]), ok([]), ok([]), ok([])]);
+    mocks.authenticated.mockResolvedValue({ db, profile: privateProfile });
+    mocks.modelResponse.mockResolvedValue('{"intent":"next_medication"}');
+    const message = "What medication is scheduled next?";
+    const response = await companion(request("companion", { patient_id: patient, message }));
+    expect(response.status).toBe(200);
+    expect(mocks.modelResponse).toHaveBeenCalledTimes(1);
+    const [, input] = mocks.modelResponse.mock.calls[0];
+    expect(JSON.parse(input)).toEqual({ question: message });
+    expect(input).not.toContain("PRIVATE_PATIENT_NAME");
+  });
   it("does not forward emergency questions to the model or query medical records", async () => {
     const db = database([]); mocks.authenticated.mockResolvedValue({ db, profile });
     const response = await companion(request("companion", { patient_id: null, message: "I feel unwell" }));
